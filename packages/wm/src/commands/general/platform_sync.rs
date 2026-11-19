@@ -152,7 +152,18 @@ fn sync_focus(
       .animation_manager
       .resize_sessions
       .contains_key(&window.id());
-    if is_ws_focus_held || has_resize_session {
+    if is_ws_focus_held {
+      // Only the OS handover waits; the WM's own focus already moved.
+      // Announce it now so status bars (Zebar) update with the start of
+      // the slide instead of when the handover happens near its end. The
+      // handover re-runs this function and emits the event again, which
+      // subscribers handle as an idempotent refresh.
+      state.emit_event(WmEvent::FocusChanged {
+        focused_container: focused_container.to_dto()?,
+      });
+      return Ok(());
+    }
+    if has_resize_session {
       return Ok(());
     }
   }
