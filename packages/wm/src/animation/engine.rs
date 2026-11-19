@@ -88,8 +88,9 @@ fn ease_out_spring(t: f32) -> f32 {
   if t >= 1.0 {
     return 1.0;
   }
-  let c4 = (2.0 * std::f32::consts::PI) / 2.0;
-  2.0f32.powf(-12.0 * t) * ((t * 4.0 - 4.5) * c4).sin() * -1.0 + 1.0
+  // `1 - decay * cos` starts at exactly 0; the `+` form starts at 2.0 and
+  // throws the first frame past the target. Peaks at ~1.125 at t = 0.25.
+  1.0 - 2.0f32.powf(-12.0 * t) * (4.0 * std::f32::consts::PI * t).cos()
 }
 
 #[cfg(test)]
@@ -116,6 +117,24 @@ mod tests {
     assert_eq!(mid.y(), 50);
     assert_eq!(mid.width(), 150);
     assert_eq!(mid.height(), 150);
+  }
+
+  /// The spring must start at rest, overshoot moderately and settle at
+  /// 1.0. Endpoint checks alone miss a curve that jumps on the first
+  /// frame, since `t <= 0.0` and `t >= 1.0` are clamped.
+  #[test]
+  fn test_ease_out_spring_shape() {
+    assert!(ease_out_spring(0.001) < 0.05, "must start near 0");
+
+    let samples: Vec<f32> = (1..100)
+      .map(|i| ease_out_spring(i as f32 / 100.0))
+      .collect();
+    let peak = samples.iter().copied().fold(f32::MIN, f32::max);
+    assert!(peak > 1.0 && peak < 1.2, "overshoot out of range: {peak}");
+    assert!(samples.iter().all(|v| *v >= 0.0), "must not go negative");
+
+    assert!((ease_out_spring(0.99) - 1.0).abs() < 0.01, "must settle");
+    assert_eq!(ease_out_spring(1.0), 1.0);
   }
 }
 
