@@ -52,6 +52,20 @@ const VSYNC_PIPELINE_OFFSET_US: u64 = 1_500;
 #[cfg(target_os = "windows")]
 const WS_COMPLETE_THRESHOLD_PX: f32 = 1.5;
 
+/// How long before a workspace switch ends the incoming focused window is
+/// given OS focus.
+///
+/// Focusing a cloaked window makes Windows uncloak it 30-110 ms later
+/// (measured), and an uncloak mid-slide shows the real window at its
+/// final spot while its copy is still sliding in. Handing focus over
+/// this long before the end lands the uncloak in the last few frames,
+/// where an ease-out curve has almost no distance left, while keyboard
+/// input reaches the new workspace well before the slide finishes.
+/// Focusing at the start instead was tried: the real window popped in
+/// ~500 px ahead of its copy.
+#[cfg(target_os = "windows")]
+const WS_FOCUS_HANDOFF_LEAD: Duration = Duration::from_millis(100);
+
 /// Grace period held at the start of a window-open animation before the
 /// surrogate begins revealing the window.
 ///
@@ -201,6 +215,9 @@ struct WorkspaceSwitchState {
   /// no zoom (plain slide). The outgoing workspace scales from `1.0` to
   /// `1.0 - zoom_factor`; the incoming from `1.0 - zoom_factor` to `1.0`.
   zoom_factor: f32,
+  /// Whether OS focus may move to the incoming focused window yet. Set
+  /// `WS_FOCUS_HANDOFF_LEAD` before the end of the slide.
+  focus_released: bool,
 }
 
 /// State for an active iris-wipe workspace transition.
@@ -826,6 +843,8 @@ impl AnimationManager {
     // the incoming windows are queued for redraw and uncloaked in the same
     // tick.
     #[cfg(target_os = "windows")]
+    let mut release_ws_focus = false;
+    #[cfg(target_os = "windows")]
     let ws_complete_ids: Option<Vec<Uuid>> = {
       use crate::animation::engine::{
         animation_progress_at, apply_easing,
@@ -854,6 +873,16 @@ impl AnimationManager {
         let start = *ws.start_time.get_or_insert(now);
         let raw_progress = animation_progress_at(start, ws.duration, now);
         let eased = apply_easing(raw_progress, &ws.easing);
+
+        // Hand OS focus to the incoming window shortly before the end; see
+        // `WS_FOCUS_HANDOFF_LEAD`.
+        if !ws.focus_released
+          && now.saturating_duration_since(start) + WS_FOCUS_HANDOFF_LEAD
+            >= ws.duration
+        {
+          ws.focus_released = true;
+          release_ws_focus = true;
+        }
 
         // Complete early once the surrogate is within
         // `WS_COMPLETE_THRESHOLD_PX` of its target for non-overshooting
@@ -1003,6 +1032,11 @@ impl AnimationManager {
       // uncloaking the incoming focused window mid-slide. Now that the
       // surrogates are done and incoming windows are about to be uncloaked,
       // it is safe to transfer OS focus.
+      state.pending_sync.queue_focus_change();
+    }
+
+    #[cfg(target_os = "windows")]
+    if release_ws_focus {
       state.pending_sync.queue_focus_change();
     }
 
@@ -1606,6 +1640,17 @@ impl AnimationManager {
       .unwrap_or(false)
   }
 
+  /// Returns `true` while OS focus must not yet move to `window_id`: it is
+  /// incoming in the active workspace switch and the slide is not yet
+  /// within `WS_FOCUS_HANDOFF_LEAD` of its end.
+  #[cfg(target_os = "windows")]
+  pub fn is_workspace_switch_focus_held(&self, window_id: &Uuid) -> bool {
+    self.workspace_switch.as_ref().is_some_and(|ws| {
+      !ws.focus_released
+        && ws.windows.get(window_id).is_some_and(|e| e.is_incoming)
+    })
+  }
+
   /// Returns `true` when `window_id` is an incoming participant held in
   /// `pending_ws_cleanup` (the one-tick cleanup state after the animation
   /// completes). Used to force synchronous `SetWindowPos` before uncloaking
@@ -1707,6 +1752,7 @@ impl AnimationManager {
         slide_distance_v,
         zoom_factor: ws_config.zoom_factor.clamp(0.0, 1.0),
         vsync_anchored: false,
+        focus_released: false,
       });
     } else {
       tracing::warn!("Workspace-switch skipped: no windows to animate.");

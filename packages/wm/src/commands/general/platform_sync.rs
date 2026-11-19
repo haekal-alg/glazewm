@@ -140,18 +140,19 @@ fn sync_focus(
   // causing the slow `IApplicationView::SetCloak` path to fire on the next
   // animation tick and blocking the frame loop. `AnimationManager::update_internal`
   // re-queues the focus change once the animation completes and the window is
-  // uncloaked.
+  // uncloaked. For workspace switches the hold lifts shortly before
+  // the slide ends instead (see `WS_FOCUS_HANDOFF_LEAD`), so typing
+  // works sooner.
   #[cfg(target_os = "windows")]
   if let Some(window) = &native_window {
-    let is_ws_incoming = state.animation_manager.is_workspace_switch_active()
-      && state
-        .animation_manager
-        .is_workspace_switch_incoming(&window.id());
+    let is_ws_focus_held = state
+      .animation_manager
+      .is_workspace_switch_focus_held(&window.id());
     let has_resize_session = state
       .animation_manager
       .resize_sessions
       .contains_key(&window.id());
-    if is_ws_incoming || has_resize_session {
+    if is_ws_focus_held || has_resize_session {
       return Ok(());
     }
   }
