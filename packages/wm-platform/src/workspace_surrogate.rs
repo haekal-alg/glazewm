@@ -97,13 +97,16 @@ impl WorkspaceSurrogate {
     self.inner.set_thumbnail_visible(false);
   }
 
-  /// Shows the surrogate at full opacity with the thumbnail at the window's
-  /// natural (unscaled) position within the monitor viewport.
+  /// Shows the surrogate at near-zero opacity with the thumbnail at the
+  /// window's natural (unscaled) position within the monitor viewport.
   ///
-  /// Always uses opacity `255` (fully opaque) so the surrogate completely
-  /// covers the real window before it is cloaked, avoiding a double-blend
-  /// frame. Call [`apply_effect_opacity`] after the real window is cloaked to
-  /// reduce the thumbnail to the configured `opacity`.
+  /// The surrogate sits below the still-visible real window, so a
+  /// translucent window would show its own copy through itself (a darker
+  /// double-blend flash) if the surrogate were opaque here. Opacity `1`
+  /// rather than `0` keeps DWM compositing the thumbnail so it is warm
+  /// when the real window is cloaked. Call [`apply_effect_opacity`]
+  /// right after cloaking, with no DWM flush in between, so the swap
+  /// lands in one frame.
   ///
   /// [`apply_effect_opacity`]: WorkspaceSurrogate::apply_effect_opacity
   pub fn show_initial(&mut self) {
@@ -116,7 +119,7 @@ impl WorkspaceSurrogate {
       bottom: self.rect.bottom - self.viewport.top,
     };
     self.inner.set_thumbnail_rects(rc_src, rc_dst);
-    self.inner.set_window_opacity(u8::MAX);
+    self.inner.set_window_opacity(1);
     self.inner.set_visible(true);
   }
 

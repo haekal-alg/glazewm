@@ -2045,6 +2045,28 @@ impl AnimationManager {
     }
   }
 
+  /// Raises one outgoing workspace-switch surrogate from its
+  /// near-invisible `show_initial` opacity to the configured effect
+  /// opacity.
+  ///
+  /// Call immediately before the real window is cloaked. Raising all
+  /// surrogates only after the whole redraw loop leaves already-cloaked
+  /// windows with neither the real window nor the copy visible for the
+  /// remaining (slow, per-window COM) loop time, blinking every window.
+  #[cfg(target_os = "windows")]
+  pub fn apply_outgoing_surrogate_opacity(&mut self, window_id: Uuid) {
+    let Some(ref mut ws) = self.workspace_switch else {
+      return;
+    };
+    if let Some(entry) = ws.windows.get_mut(&window_id) {
+      if !entry.is_incoming {
+        if let Some(ref mut s) = entry.surrogate {
+          s.apply_effect_opacity();
+        }
+      }
+    }
+  }
+
   /// Applies the configured effect opacity to all outgoing workspace-switch
   /// surrogates.
   ///

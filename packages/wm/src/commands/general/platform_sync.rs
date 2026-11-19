@@ -454,7 +454,7 @@ fn redraw_containers(
           }
 
           // Single flush: DWM renders one frame with outgoing surrogates
-          // at full opacity, ensuring surrogate content is composited
+          // at near-zero opacity, ensuring surrogate content is composited
           // before the real windows are cloaked below. Incoming windows
           // start off-screen, so DWM warms their thumbnails over the
           // first few frames of the slide without a visible gap.
@@ -902,6 +902,16 @@ fn redraw_containers(
             .was_pre_committed_at(&window.id(), apply_rect);
         #[cfg(not(target_os = "windows"))]
         let already_positioned = false;
+
+        // Swap the outgoing window for its surrogate per window, right
+        // before `reposition_window` cloaks it, mirroring the per-window
+        // uncloak + thumbnail hide at the end of the animation.
+        #[cfg(target_os = "windows")]
+        if is_outgoing_switch {
+          state
+            .animation_manager
+            .apply_outgoing_surrogate_opacity(window.id());
+        }
 
         if !already_positioned {
           if let Err(err) = reposition_window(
